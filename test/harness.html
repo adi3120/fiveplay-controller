@@ -1,0 +1,320 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>FivePlay Controller tests</title>
+<!-- Stand-in for the game page: the same element ids, and listeners that read the same event fields the page reads
+     (code from key events, button from mousedown on the canvas and mouseup on the window, movementX/Y while the pointer
+     is locked, deltaY from wheel events). Two controllers are connected, an idle virtual pad listed first and a Logitech
+     F310 (D mode) second, so picking the controller that is actually used is covered too. -->
+<canvas id="canvas" width="64" height="64"></canvas>
+<div id="loading"></div>
+<pre id="out">tests did not run</pre>
+<script>
+	const keys = new Set(), mouse = new Set(), log = [];
+	let moveX = 0, moveY = 0, isLocked = false, logitechPresent = true, virtualPresent = true;
+	addEventListener('keydown', (e) => { keys.add(e.code); log.push('+' + e.code); });
+	addEventListener('keyup', (e) => { keys.delete(e.code); log.push('-' + e.code); });
+	document.getElementById('canvas').addEventListener('mousedown', (e) => { mouse.add(e.button); log.push('+M' + e.button); });
+	addEventListener('mouseup', (e) => { mouse.delete(e.button); log.push('-M' + e.button); });
+	addEventListener('mousemove', (e) => { if (isLocked) { moveX += e.movementX; moveY += e.movementY; } });
+	addEventListener('wheel', (e) => log.push(e.deltaY < 0 ? 'W-' : 'W+'));
+	Object.defineProperty(Document.prototype, 'pointerLockElement', { configurable: true, get: () => (isLocked ? document.getElementById('canvas') : null) });
+	const LOGITECH = 'Logitech Dual Action (STANDARD GAMEPAD Vendor: 046d Product: c216)';
+	const freshButtons = (n) => Array.from({ length: n }, () => ({ pressed: false, value: 0 }));
+	const virtual = { id: 'GamePad-1 (STANDARD GAMEPAD Vendor: 045e Product: 028e)', index: 0, connected: true, mapping: 'standard', axes: [0, 0, 0, 0], buttons: freshButtons(17) };
+	const pad = { id: LOGITECH, index: 1, connected: true, mapping: 'standard', axes: [0, 0, 0, 0], buttons: freshButtons(17) };
+	Object.defineProperty(navigator, 'getGamepads', { configurable: true, value: () => [virtualPresent ? virtual : null, logitechPresent ? pad : null] });
+	window.requestAnimationFrame = () => 0;
+	try { localStorage.removeItem('fivePlayPad.lookSpeed'); } catch (e) { /* storage unavailable */ }
+</script>
+<script src="../fiveplay-controller.user.js"></script>
+<script>
+	const results = [];
+	try {
+		const P = window.__fivePlayPad;
+		if (!P) throw new Error('the controller script did not start');
+		const B = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, BACK: 8, START: 9, L3: 10, R3: 11, UP: 12, DOWN: 13, LEFT: 14, RIGHT: 15 };
+		const UP = { pressed: false, value: 0 }, DOWN = { pressed: true, value: 1 };
+		let t = 1000;
+		const run = (ms) => { for (const end = t + ms; t < end;) { t += 10; P.step(t); } };
+		const press = (b, v = 1) => { pad.buttons[B[b]] = { pressed: v > 0.5, value: v }; };
+		const release = (b) => { pad.buttons[B[b]] = UP; };
+		const tapButton = (b, ms = 30) => { press(b); run(ms); release(b); run(20); };
+		const stick = (lx, ly, rx = 0, ry = 0) => { pad.axes = [lx, ly, rx, ry]; };
+		const has = (...codes) => codes.every((c) => keys.has(c));
+		const none = (...codes) => codes.every((c) => !keys.has(c));
+		const clearLog = () => { log.length = 0; };
+		const check = (name, ok, detail = '') => results.push((ok ? 'PASS ' : 'FAIL ') + name + (ok ? '' : '   [' + detail + ']'));
+		const badgeSays = (text) => [...document.querySelectorAll('div')].some((d) => d.textContent.includes(text));
+		const holdCheck = (label, b, codes, ms = 120) => {
+			press(b); run(ms);
+			const ok = has(...codes), seen = [...keys];
+			release(b); run(30);
+			check(`${label}: ${b} = ${codes.join(' + ')}`, ok && none(...codes), seen);
+		};
+
+		run(50);
+		check('the Logitech pad is used, not the idle virtual GamePad-1 listed before it', P.state.padIndex === 1, P.state.padIndex);
+		press('A'); run(30);
+		check('loading screen: A = Enter (Story Mode)', has('Enter') && none('ShiftLeft'), [...keys]);
+		release('A'); run(30);
+		clearLog(); tapButton('X');
+		check('loading screen: X = Space (Sandbox Mode)', log.includes('+Space') && none('Space'), log);
+		clearLog(); tapButton('LEFT');
+		check('loading screen: D-pad left = 5 (City map)', log.includes('+Digit5'), log);
+		clearLog(); tapButton('RIGHT');
+		check('loading screen: D-pad right = 6 (Coast map)', log.includes('+Digit6'), log);
+		clearLog(); tapButton('Y');
+		check('loading screen: Y does nothing', log.length === 0 && P.state.mode === 'foot', log);
+		document.getElementById('loading').remove(); run(50);
+
+		stick(0, -1); run(30);
+		check('on foot: left stick up = W', has('KeyW') && none('KeyA', 'KeyS', 'KeyD'), [...keys]);
+		stick(0.7, -0.7); run(30);
+		check('on foot: up-right = W + D', has('KeyW', 'KeyD'), [...keys]);
+		stick(0.3, 0); run(30);
+		check('on foot: a small push is ignored', none('KeyW', 'KeyA', 'KeyS', 'KeyD'), [...keys]);
+		stick(0, 0); run(30);
+
+		clearLog(); press('RT'); run(30);
+		check('on foot: RT does not click before the pointer is captured, and the big click prompt shows', !mouse.has(0) && P.state.needClick && badgeSays('Click inside the game once') && [...document.querySelectorAll('div')].some((d) => d.style.display === 'block' && d.textContent.startsWith('Click inside the game once.')), log);
+		isLocked = true; run(30);
+		check('on foot: RT = left mouse (shoot) once captured', mouse.has(0));
+		release('RT'); run(30);
+		check('on foot: releasing RT releases the mouse button', !mouse.has(0));
+		press('LT', 0.6); run(30);
+		check('on foot: LT = right mouse (aim)', mouse.has(2));
+		press('LT', 0.25); run(30);
+		check('on foot: LT stays held at 0.25 (hysteresis)', mouse.has(2));
+		press('LT', 0.1); run(30);
+		check('on foot: LT lets go below 0.2', !mouse.has(2));
+		release('LT'); run(20);
+
+		moveX = moveY = 0; stick(0, 0, 1, 0); run(500);
+		check('look: right stick right moves the mouse right', moveX > 300 && Math.abs(moveY) <= 1, `x=${moveX} y=${moveY}`);
+		moveX = moveY = 0; stick(0, 0, 0, -1); run(200);
+		check('look: right stick up moves the mouse up', moveY < -100 && Math.abs(moveX) <= 1, `x=${moveX} y=${moveY}`);
+		moveX = moveY = 0; stick(0, 0, 0.1, 0); run(200);
+		check('look: inside the deadzone nothing moves', moveX === 0, `x=${moveX}`);
+		isLocked = false; moveX = moveY = 0; stick(0, 0, 1, 0); run(100);
+		check('look: nothing moves while the pointer is not captured, and the click prompt shows', moveX === 0 && P.state.needClick && badgeSays('Click inside the game once'), `x=${moveX}`);
+		isLocked = true; stick(0, 0); run(20);
+		check('look: the click prompt goes away once captured', !P.state.needClick && ![...document.querySelectorAll('div')].some((d) => d.style.display === 'block' && d.textContent.startsWith('Click inside the game once.')));
+
+		holdCheck('on foot', 'A', ['ShiftLeft', 'Enter'], 30);
+		holdCheck('on foot', 'B', ['KeyR', 'Backspace'], 30);
+		holdCheck('on foot', 'X', ['Space'], 30);
+		holdCheck('on foot', 'LB', ['Tab'], 30);
+		holdCheck('on foot', 'RB', ['KeyQ'], 30);
+		holdCheck('on foot', 'LEFT', ['KeyG'], 30);
+		holdCheck('on foot', 'RIGHT', ['KeyE'], 30);
+		press('LB'); run(30);
+		clearLog(); tapButton('RIGHT');
+		check('weapon wheel open: D-pad right = scroll down (next weapon), not interact', log.includes('W+') && !log.includes('+KeyE'), log);
+		clearLog(); tapButton('LEFT');
+		check('weapon wheel open: D-pad left = scroll up (previous weapon), not detonate', log.includes('W-') && !log.includes('+KeyG'), log);
+		moveX = moveY = 0; stick(0, 0, 1, 0); run(100);
+		check('weapon wheel open: right stick flicks toward the slot (6000 px/s)', moveX >= 500 && Math.abs(moveY) <= 1, `x=${moveX} y=${moveY}`);
+		moveX = moveY = 0; stick(0, 0, 0, -1); run(100);
+		check('weapon wheel open: right stick up flicks up', moveY <= -500 && Math.abs(moveX) <= 1, `x=${moveX} y=${moveY}`);
+		moveX = moveY = 0; stick(0, 0, 0.3, 0); run(100);
+		check('weapon wheel open: a light push does not move the selection', moveX === 0, `x=${moveX}`);
+		stick(0, 0); release('LB'); run(30);
+		moveX = moveY = 0; stick(0, 0, 1, 0); run(100);
+		check('weapon wheel closed: right stick is back to camera speed', moveX > 50 && moveX < 200, `x=${moveX}`);
+		stick(0, 0); run(20);
+
+		press('L3'); run(120);
+		check('on foot: L3 held = Left Ctrl (stealth)', has('ControlLeft'), [...keys]);
+		release('L3'); run(30);
+		check('on foot: releasing L3 releases Ctrl', none('ControlLeft'));
+		clearLog(); press('L3'); run(20); release('L3'); run(120);
+		check('on foot: a quick L3 click still taps Ctrl', log.includes('+ControlLeft') && log.includes('-ControlLeft'), log);
+		holdCheck('on foot', 'R3', ['KeyC']);
+		clearLog(); press('L3'); run(20); press('R3'); run(100);
+		check('on foot: L3 + R3 = Caps Lock (special ability), no Ctrl or C', has('CapsLock') && none('ControlLeft', 'KeyC'), log);
+		release('L3'); run(30);
+		check('on foot: special ability ends when one stick is let go', none('CapsLock', 'ControlLeft', 'KeyC'), [...keys]);
+		release('R3'); run(30);
+		check('on foot: no stray C after the special ability', !log.includes('+KeyC'), log);
+
+		clearLog(); tapButton('DOWN', 50); run(100);
+		check('D-pad down tap = Z (radar) + Down arrow', ['+KeyZ', '-KeyZ', '+ArrowDown', '-ArrowDown'].every((e) => log.includes(e)) && !log.includes('+AltLeft'), log);
+		clearLog(); press('DOWN'); run(400);
+		check('D-pad down held = Left Alt (character wheel)', has('AltLeft') && !log.includes('+ArrowDown') && !log.includes('+KeyZ'), log);
+		moveX = moveY = 0; stick(0, 0, -1, 0); run(100);
+		check('character wheel open: right stick flicks toward the character', moveX <= -500, `x=${moveX}`);
+		stick(0, 0);
+		release('DOWN'); run(30);
+		check('releasing D-pad down releases Alt', none('AltLeft'));
+
+		clearLog(); tapButton('UP');
+		check('D-pad up = Up arrow (phone)', log.includes('+ArrowUp') && P.state.overlay === 'phone', log);
+		holdCheck('phone', 'A', ['Enter'], 30);
+		check('phone: A does not sprint', !log.includes('+ShiftLeft'), log);
+		holdCheck('phone', 'B', ['Backspace'], 30);
+		check('phone: B does not reload', !log.includes('+KeyR'), log);
+		holdCheck('phone', 'X', ['Space'], 30);
+		holdCheck('phone', 'LEFT', ['ArrowLeft'], 30);
+		check('phone: D-pad left does not detonate', !log.includes('+KeyG'), log);
+		press('DOWN'); run(400);
+		check('phone: holding D-pad down scrolls (no character wheel, no radar)', has('ArrowDown') && none('AltLeft', 'KeyZ'), [...keys]);
+		release('DOWN'); run(30);
+		run(5200); press('A'); run(30);
+		check('phone controls end 5 s after the last phone button', has('ShiftLeft', 'Enter') && P.state.overlay === null, [...keys]);
+		release('A'); run(30);
+		tapButton('UP'); stick(0, -1); run(400); stick(0, 0); run(30);
+		check('walking away with the left stick puts the phone controls away', P.state.overlay === null, P.state.overlay);
+
+		press('A'); run(30);
+		clearLog(); press('START'); run(30);
+		const shiftUp = log.indexOf('-ShiftLeft'), pDown = log.indexOf('+KeyP');
+		check('Start = P (pause), with Shift let go first because Shift + P is the page\'s debug-mode switch', pDown >= 0 && shiftUp >= 0 && shiftUp < pDown && none('ShiftLeft') && P.state.overlay === 'pause', log);
+		release('START'); run(30);
+		check('Shift comes back when Start is let go while A is still held', has('ShiftLeft'), [...keys]);
+		release('A'); run(30);
+		holdCheck('pause menu', 'A', ['Enter'], 30);
+		clearLog(); tapButton('Y');
+		check('pause menu: Y = Tab, and it does not switch to driving', log.includes('+Tab') && !log.includes('+KeyF') && P.state.mode === 'foot', log);
+		holdCheck('pause menu', 'LB', ['KeyQ'], 30);
+		holdCheck('pause menu', 'RB', ['KeyE'], 30);
+		holdCheck('pause menu', 'RIGHT', ['ArrowRight'], 30);
+		holdCheck('pause menu', 'UP', ['ArrowUp'], 30);
+		check('pause menu: D-pad up stays in the pause menu', P.state.overlay === 'pause', P.state.overlay);
+		holdCheck('pause menu', 'RT', ['PageUp'], 30);
+		holdCheck('pause menu', 'LT', ['PageDown'], 30);
+		check('pause menu: triggers do not shoot or aim', !log.includes('+M0') && !log.includes('+M2'), log);
+		clearLog(); tapButton('START');
+		check('Start again closes the pause menu', log.includes('+KeyP') && P.state.overlay === null, `${P.state.overlay}; ${log}`);
+		press('RT'); run(30);
+		check('after the pause menu, RT shoots again', mouse.has(0));
+		release('RT'); run(30);
+		tapButton('START'); tapButton('B'); run(3100);
+		check('B in the pause menu ends menu controls 3 s later (it may have closed the menu)', P.state.overlay === null, P.state.overlay);
+
+		clearLog(); tapButton('BACK'); run(100);
+		check('Back tap = V (camera view)', log.includes('+KeyV') && log.includes('-KeyV'), log);
+		const speed = P.state.speed;
+		press('BACK'); run(20); tapButton('UP'); release('BACK'); run(100);
+		check('Back + D-pad up raises look speed without Up arrow or V', P.state.speed > speed && !log.includes('+ArrowUp') && log.filter((e) => e === '+KeyV').length === 1, `${speed} -> ${P.state.speed}; ${log}`);
+		clearLog(); press('BACK'); run(20); tapButton('X'); release('BACK'); run(100);
+		check('Back + X = equals key (FPS counter)', log.includes('+Equal') && !log.includes('+Space'), log);
+		press('BACK'); run(20); tapButton('A'); release('BACK'); run(30);
+		check('Back + A shows the button layout', [...document.querySelectorAll('div')].some((d) => d.style.display === 'block' && d.textContent.includes('GTA V controller layout')));
+		press('BACK'); run(20); tapButton('A'); release('BACK'); run(30);
+
+		clearLog(); press('RT'); run(30);
+		check('on foot: holding RT shoots', mouse.has(0));
+		tapButton('Y');
+		check('Y = F and switches to driving', log.includes('+KeyF') && P.state.mode === 'drive', `${P.state.mode}; ${log}`);
+		run(30);
+		check('driving: the held RT turns from shooting into accelerating', has('KeyW') && !mouse.has(0), [...keys]);
+		release('RT'); run(30);
+		holdCheck('driving', 'LT', ['KeyS'], 30);
+
+		let onFrames = 0, edges = 0, wasOn = false;
+		stick(-0.575, 0);
+		for (let i = 0; i < 100; i++) {
+			run(10);
+			const on = keys.has('KeyA');
+			onFrames += on;
+			edges += on !== wasOn;
+			wasOn = on;
+		}
+		check('driving: half-left steering pulses A about half the time', onFrames > 30 && onFrames < 70 && edges >= 6 && none('KeyD'), `on ${onFrames}/100, edges ${edges}`);
+		stick(1, 0); run(30);
+		check('driving: full right holds D', has('KeyD') && none('KeyA'), [...keys]);
+		stick(0, -1); run(30);
+		check('driving: left stick forward = Left Shift (lean forward)', has('ShiftLeft') && none('ControlLeft', 'KeyA', 'KeyD'), [...keys]);
+		stick(0, 1); run(30);
+		check('driving: left stick back = Left Ctrl (lean back)', has('ControlLeft') && none('ShiftLeft'), [...keys]);
+		stick(0, 0); run(30);
+		check('driving: centred stick, no steering or lean', none('KeyA', 'KeyD', 'ShiftLeft', 'ControlLeft'), [...keys]);
+
+		press('RB'); run(30);
+		check('driving: RB = Space (handbrake)', has('Space') && !mouse.has(0));
+		release('RB'); run(30);
+		press('LB'); run(30); press('RB'); run(30);
+		check('driving: LB + RB = aim and shoot (drive-by), no handbrake', mouse.has(2) && mouse.has(0) && none('Space'), [...keys]);
+		release('RB'); release('LB'); run(30);
+		check('driving: drive-by buttons released', !mouse.has(0) && !mouse.has(2));
+		holdCheck('driving', 'A', ['KeyX', 'Enter']);
+		holdCheck('driving', 'B', ['KeyR', 'Backspace']);
+		holdCheck('driving', 'L3', ['KeyE']);
+		holdCheck('driving', 'R3', ['KeyC']);
+		holdCheck('driving', 'LEFT', ['KeyQ']);
+		holdCheck('driving', 'RIGHT', ['KeyH']);
+		clearLog(); tapButton('X');
+		check('driving: X = scroll up (next vehicle weapon), no key', log.includes('W-') && !log.some((e) => e.startsWith('+')), log);
+
+		clearLog(); press('BACK'); run(20); tapButton('Y'); release('BACK'); run(100);
+		check('Back + Y switches to flying without pressing F or V', P.state.mode === 'fly' && !log.includes('+KeyF') && !log.includes('+KeyV'), `${P.state.mode}; ${log}`);
+		stick(0, -1); run(30);
+		check('flying: stick forward = numpad 8 (nose down)', has('Numpad8') && none('Numpad5', 'Numpad2'), [...keys]);
+		stick(0, 1); run(30);
+		check('flying: stick back = numpad 5 (nose up, the game binding) + numpad 2 (the page alias)', has('Numpad5', 'Numpad2') && none('Numpad8'), [...keys]);
+		stick(1, 0); run(30);
+		check('flying: stick right = numpad 6 (roll right)', has('Numpad6'), [...keys]);
+		stick(0, 0); run(30);
+		holdCheck('flying', 'RT', ['KeyW']);
+		holdCheck('flying', 'LT', ['KeyS']);
+		holdCheck('flying', 'LB', ['KeyA', 'Numpad7']);
+		holdCheck('flying', 'RB', ['KeyD', 'Numpad9']);
+		holdCheck('flying', 'X', ['ShiftLeft']);
+		holdCheck('flying', 'L3', ['KeyG']);
+		holdCheck('flying', 'R3', ['Insert', 'KeyC']);
+		holdCheck('flying', 'RIGHT', ['KeyE']);
+		press('A'); run(30);
+		check('flying: A = right mouse (fire) + Left Ctrl (submarine dive) + Enter', mouse.has(2) && has('ControlLeft', 'Enter'), [...keys]);
+		release('A'); run(30);
+		clearLog(); tapButton('LEFT');
+		check('flying: D-pad left = scroll up (next weapon) + Q (radio)', log.includes('W-') && log.includes('+KeyQ'), log);
+		tapButton('Y');
+		check('flying: Y gets out and returns to on foot', P.state.mode === 'foot');
+
+		virtual.buttons[0] = DOWN; run(30);
+		check('touching another controller switches to it', P.state.padIndex === 0, P.state.padIndex);
+		virtual.buttons[0] = UP; run(30);
+		press('A'); run(30);
+		check('touching the Logitech pad switches back', P.state.padIndex === 1, P.state.padIndex);
+		release('A'); run(30);
+
+		press('A'); stick(0, -1); run(30);
+		check('setup: sprinting forward', has('ShiftLeft', 'KeyW'), [...keys]);
+		dispatchEvent(new Event('blur'));
+		check('switching away from the window releases every key', keys.size === 0, [...keys]);
+		run(30);
+		check('back in the window, a button held through the switch needs a fresh press', none('ShiftLeft') && has('KeyW'), [...keys]);
+		release('A'); stick(0, 0); run(30);
+
+		press('A'); run(30);
+		logitechPresent = false; run(30);
+		check('unplugging the controller releases every key', keys.size === 0, [...keys]);
+		virtualPresent = false; run(30);
+		check('with no controller at all, the badge asks for one', badgeSays('connect it'));
+		virtualPresent = logitechPresent = true; release('A'); run(30);
+		check('plugging it back in picks the Logitech pad again', P.state.padIndex === 1, P.state.padIndex);
+
+		pad.id = 'Generic USB Joystick (Vendor: 0079 Product: 0006)'; pad.mapping = ''; run(30);
+		check('a pad Chrome cannot lay out gets a warning', badgeSays('unusual layout'));
+		pad.id = 'Logitech Dual Action (Vendor: 046d Product: c216)';
+		pad.buttons = freshButtons(12);
+		pad.axes = [0, 0, 0, 0, 0, 0, 0, 0, 0, 9 / 7];
+		run(30);
+		check('Logitech D mode that Chrome does not lay out: remapped, no warning', !badgeSays('unusual layout'));
+		pad.buttons[1] = DOWN; run(30);
+		check('remapped F310: raw button 2 = A (sprint + Enter)', has('ShiftLeft', 'Enter'), [...keys]);
+		pad.buttons[1] = UP; run(30);
+		pad.buttons[0] = DOWN; run(30);
+		check('remapped F310: raw button 1 = X (jump)', has('Space'), [...keys]);
+		pad.buttons[0] = UP; run(30);
+		clearLog(); pad.axes[9] = -1; run(30); pad.axes[9] = 9 / 7; run(30);
+		check('remapped F310: hat up = D-pad up (phone)', log.includes('+ArrowUp'), log);
+		moveX = moveY = 0; pad.axes[5] = -1; run(200); pad.axes[5] = 0; run(20);
+		check('remapped F310: right stick vertical (axis 6) looks up', moveY < -50 && Math.abs(moveX) <= 1, `x=${moveX} y=${moveY}`);
+	} catch (e) {
+		results.push('FAIL exception: ' + (e && e.stack || e));
+	}
+	try { localStorage.removeItem('fivePlayPad.lookSpeed'); } catch (e) { /* storage unavailable */ }
+	const passed = results.filter((r) => r.startsWith('PASS')).length;
+	document.getElementById('out').textContent = results.join('\n') + `\n${passed}/${results.length} passed`;
+</script>
