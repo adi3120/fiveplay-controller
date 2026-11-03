@@ -1,6 +1,6 @@
 # FivePlay Controller
 
-Play [fiveplay.lol](https://fiveplay.lol/), the browser port of GTA V, with a game controller, using GTA V's original controller layout.
+Play the browser port of GTA V, with a game controller, using GTA V's original controller layout.
 
 The game page only understands a keyboard and mouse. This script reads your controller through Chrome and, for every button, sends the key or mouse input that GTA V's PC version binds to the same action, so each button does what it does on a console.
 
@@ -15,12 +15,12 @@ The game page only understands a keyboard and mouse. This script reads your cont
 
 **Bookmark (no extension needed):** open the [installer page](https://adi3120.github.io/fiveplay-controller/), show the bookmarks bar (Cmd + Shift + B on a Mac, Ctrl + Shift + B on Windows and Linux) and drag the green **FivePlay Controller** button onto it.
 
-**Userscript (starts by itself):** with [Tampermonkey](https://www.tampermonkey.net/) or [Violentmonkey](https://violentmonkey.github.io/) installed, open [fiveplay-controller.user.js](https://raw.githubusercontent.com/adi3120/fiveplay-controller/main/fiveplay-controller.user.js) and confirm the install. It runs on fiveplay.lol automatically and updates itself from this repository.
+**Userscript (starts by itself):** with [Tampermonkey](https://www.tampermonkey.net/) or [Violentmonkey](https://violentmonkey.github.io/) installed, open [fiveplay-controller.user.js](https://raw.githubusercontent.com/adi3120/fiveplay-controller/main/fiveplay-controller.user.js) and confirm the install. It runs on V Browser port automatically and updates itself from this repository.
 
 ## Play
 
 1. Connect the controller over Bluetooth or USB.
-2. Open fiveplay.lol in Google Chrome and click the bookmark (not needed with the userscript).
+2. Open V browser port in Google Chrome and click the bookmark (not needed with the userscript).
 3. Press any button on the controller. Chrome only shows a controller to a page after a button press.
 4. Click inside the game once. Chrome needs one real click before the controller can look around, aim and shoot; a yellow message reminds you.
 
@@ -77,7 +77,7 @@ Button names are the Xbox-style ones printed on Xbox and Logitech pads. On PlayS
 
 ## Tips for smooth play
 
-The game page reads options from its address. On high-resolution screens, [fiveplay.lol/?scale=0.5](https://fiveplay.lol/?scale=0.5) renders at half resolution, which is much faster. Add `&fps=30` for a steady 30 fps on slower machines.
+The game page reads options from its address. On high-resolution screens, ?scale=0.5 renders at half resolution, which is much faster. Add `&fps=30` for a steady 30 fps on slower machines.
 
 ## Settings
 
@@ -114,7 +114,7 @@ You can also open `test/harness.html` in Chrome to see the results on the page.
 
 ## Disclaimer
 
-An unofficial fan project, not affiliated with or endorsed by Rockstar Games, Take-Two Interactive or fiveplay.lol. This repository contains no game code or assets. Grand Theft Auto and GTA are trademarks of Take-Two Interactive.
+An unofficial fan project, not affiliated with or endorsed by Rockstar Games, Take-Two Interactive. This repository contains no game code or assets. Grand Theft Auto and GTA are trademarks of Take-Two Interactive.
 
 ## License
 
